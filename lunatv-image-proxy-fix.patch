@@ -1,0 +1,116 @@
+diff --git a/src/app/admin/page.tsx b/src/app/admin/page.tsx
+index 3c5cce0..409d5f6 100644
+--- a/src/app/admin/page.tsx
++++ b/src/app/admin/page.tsx
+@@ -3414,9 +3414,7 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig |
+ 
+   // 豆瓣图片代理选项
+   const doubanImageProxyTypeOptions = [
+-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
+     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
+-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
+     {
+       value: 'cmliussss-cdn-tencent',
+       label: '豆瓣 CDN By CMLiussss（腾讯云）',
+@@ -3451,7 +3449,9 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig |
+         DoubanProxyType: config.SiteConfig.DoubanProxyType || 'cmliussss-cdn-tencent',
+         DoubanProxy: config.SiteConfig.DoubanProxy || '',
+         DoubanImageProxyType:
+-          config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
++          (config.SiteConfig.DoubanImageProxyType === 'direct' || config.SiteConfig.DoubanImageProxyType === 'img3')
++            ? 'server'
++            : (config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent'),
+         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
+         DisableYellowFilter: config.SiteConfig.DisableYellowFilter || false,
+         FluidSearch: config.SiteConfig.FluidSearch || true,
+diff --git a/src/components/UserMenu.tsx b/src/components/UserMenu.tsx
+index 2d55278..73cfdf7 100644
+--- a/src/components/UserMenu.tsx
++++ b/src/components/UserMenu.tsx
+@@ -88,9 +88,7 @@ export const UserMenu: React.FC = () => {
+ 
+   // 豆瓣图片代理选项
+   const doubanImageProxyTypeOptions = [
+-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
+     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
+-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
+     {
+       value: 'cmliussss-cdn-tencent',
+       label: '豆瓣 CDN By CMLiussss（腾讯云）',
+@@ -159,10 +157,13 @@ export const UserMenu: React.FC = () => {
+       );
+       const defaultDoubanImageProxyType =
+         (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
++      // 兼容历史数据：直连和豆瓣官方精品 CDN 已失效，统一使用服务器代理
++      const normalizeImageProxyType = (type: string) =>
++        type === 'direct' || type === 'img3' ? 'server' : type;
+       if (savedDoubanImageProxyType !== null) {
+-        setDoubanImageProxyType(savedDoubanImageProxyType);
++        setDoubanImageProxyType(normalizeImageProxyType(savedDoubanImageProxyType));
+       } else if (defaultDoubanImageProxyType) {
+-        setDoubanImageProxyType(defaultDoubanImageProxyType);
++        setDoubanImageProxyType(normalizeImageProxyType(defaultDoubanImageProxyType));
+       }
+ 
+       const savedDoubanImageProxyUrl = localStorage.getItem(
+@@ -422,8 +423,11 @@ export const UserMenu: React.FC = () => {
+       (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
+     const defaultDoubanProxy =
+       (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY || '';
+-    const defaultDoubanImageProxyType =
++    let defaultDoubanImageProxyType =
+       (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
++    if (defaultDoubanImageProxyType === 'direct' || defaultDoubanImageProxyType === 'img3') {
++      defaultDoubanImageProxyType = 'server';
++    }
+     const defaultDoubanImageProxyUrl =
+       (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
+     const defaultFluidSearch =
+diff --git a/src/lib/utils.ts b/src/lib/utils.ts
+index 3c287b5..ff714b5 100644
+--- a/src/lib/utils.ts
++++ b/src/lib/utils.ts
+@@ -4,18 +4,20 @@ import Hls from 'hls.js';
+ 
+ function getDoubanImageProxyConfig(): {
+   proxyType:
+-  | 'direct'
+   | 'server'
+-  | 'img3'
+   | 'cmliussss-cdn-tencent'
+   | 'cmliussss-cdn-ali'
+   | 'custom';
+   proxyUrl: string;
+ } {
+-  const doubanImageProxyType =
++  let doubanImageProxyType =
+     localStorage.getItem('doubanImageProxyType') ||
+     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
+     'cmliussss-cdn-tencent';
++  // 兼容历史数据：直连和豆瓣官方精品 CDN 已失效，统一使用服务器代理
++  if (doubanImageProxyType === 'direct' || doubanImageProxyType === 'img3') {
++    doubanImageProxyType = 'server';
++  }
+   const doubanImageProxy =
+     localStorage.getItem('doubanImageProxyUrl') ||
+     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY ||
+@@ -41,8 +43,6 @@ export function processImageUrl(originalUrl: string): string {
+   switch (proxyType) {
+     case 'server':
+       return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+-    case 'img3':
+-      return originalUrl.replace(/img\d+\.doubanio\.com/g, 'img3.doubanio.com');
+     case 'cmliussss-cdn-tencent':
+       return originalUrl.replace(
+         /img\d+\.doubanio\.com/g,
+@@ -55,9 +55,8 @@ export function processImageUrl(originalUrl: string): string {
+       );
+     case 'custom':
+       return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
+-    case 'direct':
+     default:
+-      return originalUrl;
++      return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+   }
+ }
+ 
